@@ -14,4 +14,10 @@ public @interface OneToOne {
 
     String column();
 
+    TargetTable targetTable() default TargetTable.THIS;
+
+    enum TargetTable {
+        THIS, OTHER;
+    }
+
 }

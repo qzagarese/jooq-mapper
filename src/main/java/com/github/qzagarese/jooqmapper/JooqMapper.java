@@ -16,7 +16,7 @@ import java.util.stream.Stream;
 
 
 public class  JooqMapper<T> {
-    private static final String TABLE_ANNOTATION_NOT_FOUND_TEMPLATE_MSG = "Target entity must declare an annotation of type %s";
+    private static final String TABLE_ANNOTATION_NOT_FOUND_TEMPLATE_MSG = "Target entity %s must declare an annotation of type %s";
     private static final String CANNOT_INSTANTIATE_TYPE_TEMPLATE_MSG = "Cannot instantiate type %s. Make sure your type provides a zero-args public constructor.";
     private static final String FIELD_NOT_FOUND_TEMPLATE_MSG = "Could not find field %s on class %s. Please check your jooq generated classes.";
     private static final String ASSIGNMENT_ERROR_TEMPLATE_MSG = "Cannot assign value of type %s to field (%s) of type %s";
@@ -43,12 +43,7 @@ public class  JooqMapper<T> {
     }
 
     private <T> T buildOne(Class<T> type, Set<Record> records) {
-        JooqTable table = type.getDeclaredAnnotation(JooqTable.class);
-        if (table == null) {
-            throw new RuntimeException(String.format(TABLE_ANNOTATION_NOT_FOUND_TEMPLATE_MSG, JooqTable.class.getName()));
-        }
-
-
+        JooqTable table = getJooqTable(type);
         T target = instantiate(type);
         Arrays.stream(type.getDeclaredFields()).forEach(f -> {
             if (isLeafProperty(f)) {
@@ -58,6 +53,14 @@ public class  JooqMapper<T> {
             }
         });
         return target;
+    }
+
+    private <T> JooqTable getJooqTable(Class<T> type) {
+        JooqTable table = type.getDeclaredAnnotation(JooqTable.class);
+        if (table == null) {
+            throw new RuntimeException(String.format(TABLE_ANNOTATION_NOT_FOUND_TEMPLATE_MSG, type, JooqTable.class.getName()));
+        }
+        return table;
     }
 
     private <T> void injectProperty(Record r, JooqTable table, Field targetField, T target) {
@@ -72,7 +75,13 @@ public class  JooqMapper<T> {
         if (records == null || records.isEmpty()) {
             return;
         }
-        TableField tableField = retrieveTableField(table, targetField.getAnnotation(OneToOne.class).column());
+        OneToOne annotation = targetField.getAnnotation(OneToOne.class);
+        TableField tableField;
+        if (annotation.targetTable().equals(OneToOne.TargetTable.THIS)) {
+            tableField = retrieveTableField(table, annotation.column());
+        } else {
+            tableField = retrieveTableField(getJooqTable(targetField.getType()), annotation.column());
+        }
         Object injectableValue = new JooqMapper<>(records.stream(), tableField).build(targetField.getType());
         injectValue(targetField, target, injectableValue);
     }
