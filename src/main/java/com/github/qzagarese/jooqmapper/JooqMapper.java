@@ -3,14 +3,15 @@ package com.github.qzagarese.jooqmapper;
 
 import com.github.qzagarese.jooqmapper.annotations.JooqTable;
 import com.github.qzagarese.jooqmapper.annotations.JooqTableProperty;
+import com.github.qzagarese.jooqmapper.annotations.OneToOne;
 import com.github.qzagarese.jooqmapper.util.RecordUtils;
 import org.jooq.Record;
-import org.jooq.Result;
 import org.jooq.TableField;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 
@@ -20,16 +21,16 @@ public class  JooqMapper<T> {
     private static final String FIELD_NOT_FOUND_TEMPLATE_MSG = "Could not find field %s on class %s. Please check your jooq generated classes.";
     private static final String ASSIGNMENT_ERROR_TEMPLATE_MSG = "Cannot assign value of type %s to field (%s) of type %s";
 
-    private final Result<Record> result;
+    private final Stream<Record> result;
     private final TableField pivot;
 
-    private Map<T, Record> indexedResult;
+    private Map<T, Set<Record>> indexedResult;
 
 
-    public JooqMapper(Result<Record> result, TableField<? extends Record,T> pivot) {
+    public JooqMapper(Stream<Record> result, TableField<? extends Record,T> pivot) {
         this.result = result;
         this.pivot = pivot;
-        indexedResult = RecordUtils.indexBy(result.stream(), pivot);
+        indexedResult = RecordUtils.aggregateBy(result, pivot);
     }
 
     public <T> Stream<T> buildStream(Class<T> type) {
@@ -41,7 +42,7 @@ public class  JooqMapper<T> {
         return buildOne(type, indexedResult.values().stream().findFirst().orElse(null));
     }
 
-    private <T> T buildOne(Class<T> type, Record record) {
+    private <T> T buildOne(Class<T> type, Set<Record> records) {
         JooqTable table = type.getDeclaredAnnotation(JooqTable.class);
         if (table == null) {
             throw new RuntimeException(String.format(TABLE_ANNOTATION_NOT_FOUND_TEMPLATE_MSG, JooqTable.class.getName()));
@@ -51,10 +52,39 @@ public class  JooqMapper<T> {
         T target = instantiate(type);
         Arrays.stream(type.getDeclaredFields()).forEach(f -> {
             if (isLeafProperty(f)) {
-                injectProperty(record, table, f, target);
+                injectProperty(records.stream().findFirst().orElse(null), table, f, target);
+            } else if (isOneToOne(f)) {
+                injectOneToOne(records, table, f, target);
             }
         });
         return target;
+    }
+
+    private <T> void injectProperty(Record r, JooqTable table, Field targetField, T target) {
+        if (r == null) {
+            return;
+        }
+        TableField tableField = retrieveTableField(table, targetField.getAnnotation(JooqTableProperty.class).value());
+        injectValue(targetField, target, r.get(tableField));
+    }
+
+    private <T> void injectOneToOne(Set<Record> records, JooqTable table, Field targetField, T target) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        TableField tableField = retrieveTableField(table, targetField.getAnnotation(OneToOne.class).column());
+        Object injectableValue = new JooqMapper<>(records.stream(), tableField).build(targetField.getType());
+        injectValue(targetField, target, injectableValue);
+    }
+
+    private TableField retrieveTableField(JooqTable table, String columnName) {
+        Field tableFieldMember = null;
+        try {
+            tableFieldMember = table.value().getDeclaredField(columnName);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(String.format(FIELD_NOT_FOUND_TEMPLATE_MSG, columnName, table.value().getName()));
+        }
+        return cast(extractFieldValue(instantiate(tableFieldMember.getDeclaringClass()), tableFieldMember), TableField.class);
     }
 
     private <T> T instantiate(Class<T> type) {
@@ -67,33 +97,16 @@ public class  JooqMapper<T> {
         return target;
     }
 
-    private <T> void injectProperty(Record r, JooqTable table, Field targetField, T target) {
-        JooqTableProperty annotation = targetField.getAnnotation(JooqTableProperty.class);
-        Field tableFieldMember = null;
-        try {
-            tableFieldMember = table.value().getDeclaredField(annotation.value());
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(String.format(FIELD_NOT_FOUND_TEMPLATE_MSG, annotation.value(), table.value().getName()));
-        }
-
-        TableField tableField = cast(extractFieldValue(instantiate(tableFieldMember.getDeclaringClass()), tableFieldMember), TableField.class);
-        injectValue(r, targetField, target, tableField);
-
-
-    }
-
-    private <T> void injectValue(Record r, Field targetField, T target, TableField tableField) {
-        Object recordFieldValue = null;
+    private <T> void injectValue(Field targetField, T target, Object injectableValue) {
         try {
             boolean accessible = targetField.isAccessible();
             targetField.setAccessible(true);
-            recordFieldValue = r.get(tableField);
-            targetField.set(target, recordFieldValue);
+            targetField.set(target, injectableValue);
             targetField.setAccessible(accessible);
         } catch (IllegalAccessException e) {
             throw new RuntimeException(e.getMessage(), e);
         } catch (IllegalArgumentException iae) {
-            throw new RuntimeException(String.format(ASSIGNMENT_ERROR_TEMPLATE_MSG, recordFieldValue.getClass().getName(),
+            throw new RuntimeException(String.format(ASSIGNMENT_ERROR_TEMPLATE_MSG, injectableValue.getClass().getName(),
                     targetField.getName(),
                     targetField.getType().getName()));
         }
@@ -121,6 +134,10 @@ public class  JooqMapper<T> {
 
     private boolean isLeafProperty(Field f) {
         return f.getAnnotation(JooqTableProperty.class) != null;
+    }
+
+    private boolean isOneToOne(Field f) {
+        return f.getAnnotation(OneToOne.class) != null;
     }
 
 }
