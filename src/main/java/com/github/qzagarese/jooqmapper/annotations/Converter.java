@@ -1,0 +1,16 @@
+package com.github.qzagarese.jooqmapper.annotations;
+
+import com.github.qzagarese.jooqmapper.PropertyConverter;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+@Target(ElementType.FIELD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Converter {
+
+    Class<? extends PropertyConverter> value();
+
+}

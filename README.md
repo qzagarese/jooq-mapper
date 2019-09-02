@@ -11,6 +11,7 @@ It provides the following annotations:
 - `OneToOne`: maps a one-to-one relationship.
 - `OneToMany`: well...it maps a one-to-many-relationship.
 - `Embedded`: it groups some properties into a pojo, based on how you have used `JooqTableProperty` inside such pojo...I mean, just look at the example.
+- `Converter`: allows you to plug in a simple conversion class for your fields.
 
 With reference to the usual jOOQ example database, you can annotate an entity as follows:
 

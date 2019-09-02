@@ -62,7 +62,12 @@ public class  JooqMapper<K> {
             return;
         }
         TableField tableField = retrieveTableField(table, targetField.getAnnotation(JooqTableProperty.class).value());
-        injectValue(targetField, target, r.get(tableField));
+        Object injectableValue = r.get(tableField);
+        if (hasConverter(targetField)) {
+            Converter converter = targetField.getAnnotation(Converter.class);
+            injectableValue = cast(instantiate(converter.value()), PropertyConverter.class).convert(injectableValue);
+        }
+        injectValue(targetField, target, injectableValue);
     }
 
     private <T> void injectEmbedded(Record r, JooqTable table, Field targetField, T target) {
@@ -195,6 +200,10 @@ public class  JooqMapper<K> {
 
     private boolean isEmbedded(Field f) {
         return f.isAnnotationPresent(Embedded.class);
+    }
+
+    private boolean hasConverter(Field targetField) {
+        return targetField.isAnnotationPresent(Converter.class);
     }
 
 }
