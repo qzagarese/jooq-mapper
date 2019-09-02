@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 
-public class  JooqMapper<T> {
+public class  JooqMapper<K> {
     private static final String TABLE_ANNOTATION_NOT_FOUND_TEMPLATE_MSG = "Target entity %s must declare an annotation of type %s";
     private static final String CANNOT_INSTANTIATE_TYPE_TEMPLATE_MSG = "Cannot instantiate type %s. Make sure your type provides a zero-args public constructor.";
     private static final String FIELD_NOT_FOUND_TEMPLATE_MSG = "Could not find field %s on class %s. Please check your jooq generated classes.";
@@ -22,10 +22,10 @@ public class  JooqMapper<T> {
     private final Stream<Record> result;
     private final TableField pivot;
 
-    private Map<T, Set<Record>> indexedResult;
+    private Map<K, Set<Record>> indexedResult;
 
 
-    public JooqMapper(Stream<Record> result, TableField<? extends Record,T> pivot) {
+    public JooqMapper(Stream<Record> result, TableField<? extends Record, K> pivot) {
         this.result = result;
         this.pivot = pivot;
         indexedResult = RecordUtils.aggregateBy(result, pivot);
