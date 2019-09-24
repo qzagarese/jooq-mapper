@@ -3,6 +3,8 @@ package com.github.qzagarese.jooqmapper;
 
 import com.github.qzagarese.jooqmapper.annotations.*;
 import com.github.qzagarese.jooqmapper.util.RecordUtils;
+import com.github.qzagarese.jooqmapper.util.RelationshipGraphNode;
+import io.vavr.Tuple3;
 import org.jooq.Record;
 import org.jooq.TableField;
 
@@ -21,14 +23,20 @@ public class  JooqMapper<K> {
 
     private final Stream<Record> result;
     private final TableField pivot;
+    private final List<RelationshipGraphNode> predecessors;
 
     private Map<K, Set<Record>> indexedResult;
 
 
     public JooqMapper(Stream<Record> result, TableField<? extends Record, K> pivot) {
+        this(result, pivot, new ArrayList<>());
+    }
+
+    private JooqMapper(Stream<Record> result, TableField<? extends Record, K> pivot, List<RelationshipGraphNode> predecessors) {
         this.result = result;
         this.pivot = pivot;
         indexedResult = RecordUtils.aggregateBy(result, pivot);
+        this.predecessors = predecessors;
     }
 
     public <T> Stream<T> buildStream(Class<T> type) {
@@ -94,8 +102,46 @@ public class  JooqMapper<K> {
         } else {
             tableField = retrieveTableField(getJooqTable(targetField.getType()), annotation.column());
         }
-        Object injectableValue = new JooqMapper<>(records.stream(), tableField).build(targetField.getType());
+
+
+
+
+        Object injectableValue = findAmongPredecessors(targetField.getType(), records.stream().findFirst(), getJooqTable(targetField.getType()));
+
+        injectableValue = injectableValue == null
+                ? new JooqMapper<>(records.stream(), tableField, buildPredecessors(table, records, this.pivot, target))
+                    .build(targetField.getType())
+                : injectableValue;
+
         injectValue(targetField, target, injectableValue);
+    }
+
+    private Object findAmongPredecessors(Class<?> type, Optional<Record> optionalRecord, JooqTable table) {
+        if (!optionalRecord.isPresent()) {
+            return Optional.empty();
+        }
+
+        Record r = optionalRecord.get();
+        return predecessors.stream()
+                .filter(p -> {
+                    return p.getEntityType().equals(type)
+                            && p.getTable().equals(table)
+                            && r.get(p.getPrinaryField()).equals(p.getPrimaryFieldValue());
+                })
+                .map(p -> p.getTarget())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private <T> List<RelationshipGraphNode> buildPredecessors(JooqTable table, Set<Record> records, TableField tableField, T target) {
+        RelationshipGraphNode node = RelationshipGraphNode.builder()
+                .entityType(target.getClass())
+                .prinaryField(tableField)
+                .target(target)
+                .primaryFieldValue(records.stream().findFirst().get().get(tableField))
+                .table(table)
+                .build();
+        return Stream.concat(predecessors.stream(), Stream.of(node)).collect(Collectors.toList());
     }
 
     private <T> void injectOneToMany(Set<Record> records, Field targetField, T target) {
@@ -105,7 +151,8 @@ public class  JooqMapper<K> {
         OneToMany annotation = targetField.getAnnotation(OneToMany.class);
         JooqTable table = getJooqTable(annotation.targetEntity());
         TableField tableField = retrieveTableField(table, annotation.otherPrimaryKeyColumn());
-        Stream<?> entitiesStream = new JooqMapper<>(records.stream(), tableField).buildStream(annotation.targetEntity());
+        Stream<?> entitiesStream = new JooqMapper<>(records.stream(), tableField, buildPredecessors(getJooqTable(target.getClass()), records, this.pivot, target))
+                .buildStream(annotation.targetEntity());
         Collection collection = convertStream(entitiesStream, targetField);
         injectValue(targetField, target, collection);
     }
